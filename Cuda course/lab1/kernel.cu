@@ -1,121 +1,164 @@
-﻿
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
+﻿#include <iostream>
+#include <cstdlib>
+#include <chrono>
+#include <cmath>
+#include <cuda_runtime.h>
+#include <vector>
+#include <iomanip>
+#include <cassert>
 
-#include <stdio.h>
+#define MAX_N 10000000  // Максимальный размер векторов
+#define STEP 1000000    // Шаг увеличения размера векторов
 
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
-
-__global__ void addKernel(int *c, const int *a, const int *b)
-{
-    int i = threadIdx.x;
-    c[i] = a[i] + b[i];
+// Реализация скалярного произведения на CPU
+float dotProductCPU(float* a, float* b, int n) {
+    float sum = 0;
+    for (int i = 0; i < n; i++) {
+        sum += a[i] * b[i];
+    }
+    return sum;
 }
 
-int main()
-{
-    const int arraySize = 5;
-    const int a[arraySize] = { 1, 2, 3, 4, 5 };
-    const int b[arraySize] = { 10, 20, 30, 40, 50 };
-    int c[arraySize] = { 0 };
+// Ядро для скалярного произведения на GPU
+__global__ void dotProductGPU(float* a, float* b, float* result, int n) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-    // Add vectors in parallel.
-    cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addWithCuda failed!");
-        return 1;
+    float temp = 0;
+    while (tid < n) {
+        temp += a[tid] * b[tid];
+        tid += blockDim.x * gridDim.x;
     }
 
-    printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
-        c[0], c[1], c[2], c[3], c[4]);
+    atomicAdd(result, temp);
+}
 
-    // cudaDeviceReset must be called before exiting in order for profiling and
-    // tracing tools such as Nsight and Visual Profiler to show complete traces.
-    cudaStatus = cudaDeviceReset();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceReset failed!");
-        return 1;
+// Функция для тестирования корректности
+void testDotProduct() {
+    const int N = 1000; // Небольшой размер для тестирования
+    float* h_a = new float[N];
+    float* h_b = new float[N];
+
+    // Инициализация векторов
+    for (int i = 0; i < N; i++) {
+        h_a[i] = static_cast<float>(i);
+        h_b[i] = static_cast<float>(i);
+    }
+
+    // Ожидаемый результат
+    float expectedResult = dotProductCPU(h_a, h_b, N);
+
+    // Создание и инициализация векторов на GPU
+    float* d_a, * d_b, * d_result;
+    cudaMalloc((void**)&d_a, N * sizeof(float));
+    cudaMalloc((void**)&d_b, N * sizeof(float));
+    cudaMalloc((void**)&d_result, sizeof(float));
+
+    cudaMemcpy(d_a, h_a, N * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, h_b, N * sizeof(float), cudaMemcpyHostToDevice);
+
+    float h_result = 0.0f;
+    cudaMemcpy(d_result, &h_result, sizeof(float), cudaMemcpyHostToDevice);
+
+    // Запуск ядра
+    int blockSize = 256;
+    int gridSize = (N + blockSize - 1) / blockSize;
+    dotProductGPU << <gridSize, blockSize >> > (d_a, d_b, d_result, N);
+
+    // Копирование результата обратно на CPU
+    cudaMemcpy(&h_result, d_result, sizeof(float), cudaMemcpyDeviceToHost);
+    float absDifference = fabs(expectedResult - h_result);
+    if (absDifference < 0.00001f) {
+        std::cout << "Test passed" << std::endl;
+    }
+    // Освобождение памяти
+    delete[] h_a;
+    delete[] h_b;
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_result);
+    std::cout << "Test failed" << std::endl;
+
+}
+
+int main() {
+    // Запускаем тест
+    testDotProduct();
+
+    // Основная часть программы
+    std::vector<int> sizes;
+    std::vector<float> resultsCPU, resultsGPU;
+    std::vector<float> cpuTimes, gpuTimes, absDifferences;
+
+    for (int N = STEP; N <= MAX_N; N += STEP) {
+        sizes.push_back(N);
+
+        // Инициализация векторов на CPU
+        float* h_a = new float[N];
+        float* h_b = new float[N];
+        for (int i = 0; i < N; i++) {
+            h_a[i] = static_cast<float>(rand()) / RAND_MAX;
+            h_b[i] = static_cast<float>(rand()) / RAND_MAX;
+        }
+
+        // Замер времени выполнения на CPU
+        auto startCPU = std::chrono::high_resolution_clock::now();
+        float cpuResult = dotProductCPU(h_a, h_b, N);
+        auto endCPU = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float, std::milli> durationCPU = endCPU - startCPU;
+        cpuTimes.push_back(durationCPU.count());
+
+        // Создаем и инициализируем векторы на GPU
+        float* d_a, * d_b, * d_result;
+        cudaMalloc((void**)&d_a, N * sizeof(float));
+        cudaMalloc((void**)&d_b, N * sizeof(float));
+        cudaMalloc((void**)&d_result, sizeof(float));
+
+        cudaMemcpy(d_a, h_a, N * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_b, h_b, N * sizeof(float), cudaMemcpyHostToDevice);
+
+        float h_result = 0.0f;
+        cudaMemcpy(d_result, &h_result, sizeof(float), cudaMemcpyHostToDevice);
+
+        // Замер времени выполнения на GPU
+        cudaEvent_t startGPU, stopGPU;
+        cudaEventCreate(&startGPU);
+        cudaEventCreate(&stopGPU);
+
+        cudaEventRecord(startGPU);
+        int blockSize = 256;
+        int gridSize = (N + blockSize - 1) / blockSize;
+        dotProductGPU << <gridSize, blockSize >> > (d_a, d_b, d_result, N);
+        cudaEventRecord(stopGPU);
+
+        cudaEventSynchronize(stopGPU);
+        float gpuTime = 0.0f;
+        cudaEventElapsedTime(&gpuTime, startGPU, stopGPU);
+        gpuTimes.push_back(gpuTime);
+
+
+        // Копируем результат обратно на CPU
+        cudaMemcpy(&h_result, d_result, sizeof(float), cudaMemcpyDeviceToHost);
+
+        // Вычисление модуля разности между результатами на CPU и GPU
+        float absDifference = fabs(cpuResult - h_result);
+        absDifferences.push_back(absDifference);
+        resultsCPU.push_back(cpuResult);
+        resultsGPU.push_back(h_result);
+        // Освобождаем память
+        delete[] h_a;
+        delete[] h_b;
+        cudaFree(d_a);
+        cudaFree(d_b);
+        cudaFree(d_result);
+        cudaEventDestroy(startGPU);
+        cudaEventDestroy(stopGPU);
+    }
+
+    // Выводим результаты
+    std::cout << "Size, CPU Time (ms), GPU Time (ms), Abs Difference (result), CPU result, GPU result" << std::endl;
+    for (size_t i = 0; i < sizes.size(); ++i) {
+        std::cout << std::fixed << std::setprecision(10) << sizes[i] << ", " << cpuTimes[i] << ", " << gpuTimes[i] << ", " << absDifferences[i] << ", " << resultsCPU[i] << ", " << resultsGPU[i] << std::endl;
     }
 
     return 0;
-}
-
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size)
-{
-    int *dev_a = 0;
-    int *dev_b = 0;
-    int *dev_c = 0;
-    cudaError_t cudaStatus;
-
-    // Choose which GPU to run on, change this on a multi-GPU system.
-    cudaStatus = cudaSetDevice(0);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Error;
-    }
-
-    // Allocate GPU buffers for three vectors (two input, one output)    .
-    cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMalloc((void**)&dev_a, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMalloc((void**)&dev_b, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    // Copy input vectors from host memory to GPU buffers.
-    cudaStatus = cudaMemcpy(dev_a, a, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMemcpy(dev_b, b, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-    // Launch a kernel on the GPU with one thread for each element.
-    addKernel<<<1, size>>>(dev_c, dev_a, dev_b);
-
-    // Check for any errors launching the kernel
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Error;
-    }
-    
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-        goto Error;
-    }
-
-    // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(c, dev_c, size * sizeof(int), cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-Error:
-    cudaFree(dev_c);
-    cudaFree(dev_a);
-    cudaFree(dev_b);
-    
-    return cudaStatus;
 }
