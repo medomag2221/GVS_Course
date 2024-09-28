@@ -88,7 +88,11 @@ void runTests() {
 	}
 
 	// Вычисление на CPU
+	auto startCPU = std::chrono::high_resolution_clock::now();
 	float cpuResult = dotProductCPU(h_a, h_b, smallSize);
+	auto endCPU = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<float, std::milli> durationCPU = endCPU - startCPU;
+	std::cout << "CPU Time for small size: " << durationCPU.count() << " ms" << std::endl;
 
 	// Выделение памяти на GPU
 	float* d_a, * d_b, * d_result;
@@ -126,10 +130,10 @@ void runTests() {
 		h_b[i] = static_cast<float>(rand()) / RAND_MAX;
 	}
 
-	auto startCPU = std::chrono::high_resolution_clock::now();
+	startCPU = std::chrono::high_resolution_clock::now();
 	cpuResult = dotProductCPU(h_a, h_b, largeSize);
-	auto endCPU = std::chrono::high_resolution_clock::now();
-	std::chrono::duration<float, std::milli> durationCPU = endCPU - startCPU;
+	endCPU = std::chrono::high_resolution_clock::now();
+	durationCPU = endCPU - startCPU;
 	std::cout << "CPU Time for large size: " << durationCPU.count() << " ms" << std::endl;
 
 	allocateGPUMemory(&d_a, &d_b, &d_result, largeSize);
