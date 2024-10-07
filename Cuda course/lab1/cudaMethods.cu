@@ -29,7 +29,7 @@ __global__ void dotProductGPU(float* a, float* b, float* result, int n) {
 
 
 	if (tid < n)
-		temp += a[tid] * b[tid];
+		temp = a[tid] * b[tid];
 
 	sdata[local_tid] = temp;
 	__syncthreads();

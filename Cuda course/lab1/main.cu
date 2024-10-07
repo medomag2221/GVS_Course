@@ -83,20 +83,27 @@ void Test(int N) {
 	std::vector<int> sizes;
 	std::vector<float> resultsCPU, resultsGPU;
 	std::vector<float> cpuTimes, gpuTimes, absDifferences;
-	std::cout << "Test Started\n\n";
+	//std::cout << "Test Started\n\n";
 	executeAll(N, sizes, resultsCPU, resultsGPU, cpuTimes, gpuTimes, absDifferences);
-	printResults(sizes, resultsCPU, resultsGPU, cpuTimes, gpuTimes, absDifferences);
+	//printResults(sizes, resultsCPU, resultsGPU, cpuTimes, gpuTimes, absDifferences);
 
 	if(absDifferences[0] < 0.01)
-		std::cout << "\nTest Passed\n";
+		std::cout << "\033[32m" << "OK\n" << "\033[0m";
 	else
 		std::cout << "\nTest Failed\n";
 
-	std::cout << "\nTest Ended\n\n";
+	//std::cout << "\nTest Ended\n\n";
 }
 
-int main() {
+__host__ int main() {
 	Test(1000);
+	Test(2000);
+	Test(3000);
+	Test(4000);
+	Test(5000);
+	Test(6000);
+	Test(7000);
+
 
 	std::vector<int> sizes;
 	std::vector<float> resultsCPU, resultsGPU;
